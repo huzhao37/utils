@@ -3,12 +3,12 @@ package rabbitmq
 import (
 	"bytes"
 	"fmt"
+	corex "gitee.com/gbat/utils/core"
 	"github.com/streadway/amqp"
 	"log"
 	"os"
 	"strings"
 	"time"
-	corex  "gitee.com/gbat/utils/core"
 )
 
 var (
@@ -20,16 +20,17 @@ var (
 	RabbitMq_QueueName       string
 	RabbitMq_QueueBKName     string
 	RabbitMq_FailedQueueName string
-	RabbitMq_Control       string
-	RabbitMq_ControlBK     string
-	RabbitMq_ControlFailed string
+	RabbitMq_Control         string
+	RabbitMq_ControlBK       string
+	RabbitMq_ControlFailed   string
 	RabbitMq_QueueCount      int
 	_conn                    *amqp.Connection
 	_channel                 *amqp.Channel
+	err                      error
 )
 
 func init() {
-	myConfig.InitConfig("./config/config.txt")//./config/config.txt
+	myConfig.InitConfig("./config/config.txt") //./config/config.txt
 	var env = myConfig.Read("global", "env")
 	RabbitMq_Uri = myConfig.Read(env, "rabbitmq.host")
 	RabbitMq_User = myConfig.Read(env, "rabbitmq.user")
@@ -48,17 +49,21 @@ func failOnError(err error, msg string) {
 		panic(fmt.Sprintf("%s: %s", msg, err))
 	}
 }
+
 //消费者1
 func Read(handler func([]byte)) {
 	url := "amqp://" + RabbitMq_User + ":" + RabbitMq_Pwd + "@" + RabbitMq_Uri + "/" //"amqp://guest:guest@localhost:5672/"
-	var err error
-	_conn, err = amqp.Dial(url)
-	failOnError(err, "[rabbitmq]Failed to connect to RabbitMQ")
-	defer _conn.Close()
+	if _conn == nil {
+		_conn, err = amqp.Dial(url)
+		failOnError(err, "[rabbitmq]Failed to connect to RabbitMQ")
+		defer _conn.Close()
 
-	_channel, err = _conn.Channel()
-	failOnError(err, "[rabbitmq]Failed to open a channel")
-	defer _channel.Close()
+	}
+	if _channel == nil {
+		_channel, err = _conn.Channel()
+		failOnError(err, "[rabbitmq]Failed to open a channel")
+		defer _channel.Close()
+	}
 
 	q, err := _channel.QueueDeclare(
 		RabbitMq_QueueName, // name
@@ -69,7 +74,7 @@ func Read(handler func([]byte)) {
 		nil,                // arguments
 	)
 	failOnError(err, "[rabbitmq]Failed to declare a queue")
-	_channel.QueueBind(RabbitMq_QueueName,RabbitMq_QueueName,"amq.topic",false,nil)
+	_channel.QueueBind(RabbitMq_QueueName, RabbitMq_QueueName, "amq.topic", false, nil)
 	failOnError(err, "[rabbitmq]Failed to declare a queue")
 	err = _channel.Qos(
 		1,     // prefetch count
@@ -119,12 +124,12 @@ func Read(handler func([]byte)) {
 //消息生产者-持久化消息
 func Write(body string, queuename string) {
 	url := "amqp://" + RabbitMq_User + ":" + RabbitMq_Pwd + "@" + RabbitMq_Uri + "/" //"amqp://guest:guest@localhost:5672/"
-	if _conn==nil{
-		_conn, err:= amqp.Dial(url)
+	if _conn == nil {
+		_conn, err := amqp.Dial(url)
 		failOnError(err, "Failed to connect to RabbitMQ")
 		defer _conn.Close()
 	}
-	if _channel==nil{
+	if _channel == nil {
 		_channel, err := _conn.Channel()
 		failOnError(err, "Failed to open a channel")
 		defer _channel.Close()
@@ -138,7 +143,7 @@ func Write(body string, queuename string) {
 		nil,       // arguments
 	)
 	failOnError(err, "Failed to declare a queue")
-	_channel.QueueBind(queuename,queuename,"amq.topic",false,nil)
+	_channel.QueueBind(queuename, queuename, "amq.topic", false, nil)
 	failOnError(err, "[rabbitmq]Failed to declare a queue")
 	err = _channel.Publish(
 		"",     // exchange
@@ -165,28 +170,28 @@ func bodyFrom(args []string) string {
 }
 
 //消息生产者-持久化消息2
-func Write2(body string, user string,pwd string,uri string,queue string) {
+func Write2(body string, user string, pwd string, uri string, queue string) {
 	url := "amqp://" + user + ":" + pwd + "@" + uri + "/" //"amqp://guest:guest@localhost:5672/"
-	if _conn==nil{
-		_conn, err:= amqp.Dial(url)
+	if _conn == nil {
+		_conn, err = amqp.Dial(url)
 		failOnError(err, "Failed to connect to RabbitMQ")
 		defer _conn.Close()
 	}
-	if _channel==nil{
-		_channel, err := _conn.Channel()
+	if _channel == nil {
+		_channel, err = _conn.Channel()
 		failOnError(err, "Failed to open a channel")
 		defer _channel.Close()
 	}
 	q, err := _channel.QueueDeclare(
 		queue, // name
-		true,      // durable
-		false,     // delete when unused
-		false,     // exclusive
-		false,     // no-wait
-		nil,       // arguments
+		true,  // durable
+		false, // delete when unused
+		false, // exclusive
+		false, // no-wait
+		nil,   // arguments
 	)
 	failOnError(err, "Failed to declare a queue")
-	_channel.QueueBind(queue,queue,"amq.topic",false,nil)
+	_channel.QueueBind(queue, queue, "amq.topic", false, nil)
 	failOnError(err, "[rabbitmq]Failed to declare a queue")
 	err = _channel.Publish(
 		"",     // exchange
@@ -201,17 +206,97 @@ func Write2(body string, user string,pwd string,uri string,queue string) {
 	failOnError(err, "Failed to publish a message")
 	fmt.Printf(" [x] Sent %s", body)
 }
-//消费者2
-func Read2(handler func(bytes []byte,mqid int)(bool),user string,pwd string,uri string,queue string,remains int,mqid int) {
-	url := "amqp://" + user + ":" + pwd + "@" + uri + "/" //"amqp://guest:guest@localhost:5672/"
-	var err error
-	_conn, err = amqp.Dial(url)
-	failOnError(err, "[rabbitmq]Failed to connect to RabbitMQ")
-	defer _conn.Close()
 
-	_channel, err = _conn.Channel()
-	failOnError(err, "[rabbitmq]Failed to open a channel")
-	defer _channel.Close()
+//消费者2
+func Read2(handler func(bytes []byte, mqid int) bool, user string, pwd string, uri string, queue string, remains int, mqid int) {
+	url := "amqp://" + user + ":" + pwd + "@" + uri + "/" //"amqp://guest:guest@localhost:5672/"
+	if _conn == nil {
+		_conn, err = amqp.Dial(url)
+		failOnError(err, "[rabbitmq]Failed to connect to RabbitMQ")
+		defer _conn.Close()
+
+	}
+	if _channel == nil {
+		_channel, err = _conn.Channel()
+		failOnError(err, "[rabbitmq]Failed to open a channel")
+		defer _channel.Close()
+	}
+
+	q, err := _channel.QueueDeclare(
+		queue, // name
+		true,  // durable
+		false, // delete when unused
+		false, // exclusive
+		false, // no-wait
+		nil,   // arguments
+	)
+	failOnError(err, "[rabbitmq]Failed to declare a queue")
+	_channel.QueueBind(queue, queue, "amq.topic", false, nil)
+	failOnError(err, "[rabbitmq]Failed to declare a queue")
+	err = _channel.Qos(
+		1,     // prefetch count
+		0,     // prefetch size
+		false, // global
+	)
+	failOnError(err, "[rabbitmq]Failed to set QoS")
+
+	msgs, err := _channel.Consume(
+		q.Name, // queue
+		"",     // consumer
+		false,  // auto-ack
+		false,  // exclusive
+		false,  // no-local
+		false,  // no-wait
+		nil,    // args
+	)
+	failOnError(err, "[rabbitmq]Failed to register a consumer")
+
+	forever := make(chan bool)
+	go func() {
+		for d := range msgs {
+			RabbitMq_QueueCount = q.Messages
+			fmt.Printf("[rabbitmq]当前队列%s累积数据量%d个\n", queue, remains)
+
+			s := fmt.Sprintf("%x", d.Body)
+			fmt.Printf("[rabbitmq]Received a message: %s", s) //strings.Join(s, "")
+			var ra = false
+			corex.Try(func() {
+				ra = handler(d.Body, mqid)
+			}, func(e interface{}) {
+				Write(s, queue+"Failed") //错误队列
+				corex.Logger.Printf("[rabbitmq]解析原始字节数据出错: %s！", e)
+			})
+			//dot_count := bytes.Count(d.Body, []byte("."))
+			//t := time.Duration(dot_count)
+			//time.Sleep(1 * time.Second)
+			fmt.Printf("[rabbitmq]Done")
+			if ra {
+				Write(s, queue+"BK") //备份
+			} else {
+				Write(s, queue+"Failed") //错误队列
+			}
+			d.Ack(false)
+			time.Sleep(100 * time.Millisecond)
+		}
+	}()
+
+	fmt.Printf(" [[rabbitmq]] Waiting for messages. To exit press CTRL+C")
+	<-forever
+}
+
+//消费者3
+func Read3(handler func(bytes []byte,mqid int)(bool),user string,pwd string,uri string,key string,queue string,remains int,mqid int) {
+	url := "amqp://" + user + ":" + pwd + "@" + uri + "/" //"amqp://guest:guest@localhost:5672/"
+	if _conn==nil{
+		_conn, err = amqp.Dial(url)
+		failOnError(err, "[rabbitmq]Failed to connect to RabbitMQ")
+		defer _conn.Close()
+	}
+	if _channel==nil{
+		_channel, err = _conn.Channel()
+		failOnError(err, "[rabbitmq]Failed to open a channel")
+		defer _channel.Close()
+	}
 
 	q, err := _channel.QueueDeclare(
 		queue, // name
@@ -222,7 +307,7 @@ func Read2(handler func(bytes []byte,mqid int)(bool),user string,pwd string,uri 
 		nil,                // arguments
 	)
 	failOnError(err, "[rabbitmq]Failed to declare a queue")
-	_channel.QueueBind(queue,queue,"amq.topic",false,nil)
+	_channel.QueueBind(queue,key,"amq.topic",false,nil)
 	failOnError(err, "[rabbitmq]Failed to declare a queue")
 	err = _channel.Qos(
 		1,     // prefetch count
@@ -274,28 +359,32 @@ func Read2(handler func(bytes []byte,mqid int)(bool),user string,pwd string,uri 
 	fmt.Printf(" [[rabbitmq]] Waiting for messages. To exit press CTRL+C")
 	<-forever
 }
-//controlresponse
-func ReadControl(handler func([]byte,interface{})(bool), user string,pwd string,uri string,queue string,cmd interface{}) {
-	url := "amqp://" + user + ":" + pwd + "@" + uri + "/" //"amqp://guest:guest@localhost:5672/"
-	var err error
-	_conn, err = amqp.Dial(url)
-	failOnError(err, "[rabbitmq]Failed to connect to RabbitMQ")
-	defer _conn.Close()
 
-	_channel, err = _conn.Channel()
-	failOnError(err, "[rabbitmq]Failed to open a channel")
-	defer _channel.Close()
+//controlresponse
+func ReadControl(handler func([]byte, interface{}) bool, user string, pwd string, uri string, queue string, cmd interface{}) {
+	url := "amqp://" + user + ":" + pwd + "@" + uri + "/" //"amqp://guest:guest@localhost:5672/"
+	if _conn == nil {
+		_conn, err = amqp.Dial(url)
+		failOnError(err, "[rabbitmq]Failed to connect to RabbitMQ")
+		defer _conn.Close()
+
+	}
+	if _channel == nil {
+		_channel, err = _conn.Channel()
+		failOnError(err, "[rabbitmq]Failed to open a channel")
+		defer _channel.Close()
+	}
 
 	q, err := _channel.QueueDeclare(
 		queue, // name
-		true,               // durable
-		false,              // delete when unused
-		false,              // exclusive
-		false,              // no-wait
-		nil,                // arguments
+		true,  // durable
+		false, // delete when unused
+		false, // exclusive
+		false, // no-wait
+		nil,   // arguments
 	)
 	failOnError(err, "[rabbitmq]Failed to declare a queue")
-	_channel.QueueBind(queue,queue,"amq.topic",false,nil)
+	_channel.QueueBind(queue, queue, "amq.topic", false, nil)
 	failOnError(err, "[rabbitmq]Failed to declare a queue")
 	err = _channel.Qos(
 		1,     // prefetch count
@@ -323,28 +412,29 @@ func ReadControl(handler func([]byte,interface{})(bool), user string,pwd string,
 
 			s := fmt.Sprintf("%x", d.Body)
 			fmt.Printf("[rabbitmq]Received a message: %s", s) //strings.Join(s, "")
-			var ra =false
+			var ra = false
 			corex.Try(func() {
-				ra=handler(d.Body,cmd)
+				ra = handler(d.Body, cmd)
 			}, func(e interface{}) {
-				corex.Logger.Fatal("队列解析错误：%s",e)
+				corex.Logger.Fatal("队列解析错误：%s", e)
 				Write(s, RabbitMq_ControlFailed) //错误队列
 				//corex.Logger.Printf("[rabbitmq]解析控制数据出错: %s！", e)
 			})
 			fmt.Printf("[rabbitmq]Done")
-			if ra{
+			if ra {
 				Write(s, queue+"BK") //备份
-			}else {
+			} else {
 				Write(s, RabbitMq_ControlFailed) //错误队列
 			}
 			d.Ack(false)
-			time.Sleep(100*time.Millisecond)
+			time.Sleep(100 * time.Millisecond)
 		}
 	}()
 
 	fmt.Printf(" [[rabbitmq]] Waiting for messages. To exit press CTRL+C")
 	<-forever
 }
+
 //demo
 func testconsumer() {
 	conn, err := amqp.Dial("amqp://guest:guest@localhost:5672/")
